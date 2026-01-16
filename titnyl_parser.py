@@ -2,6 +2,7 @@ import math
 from typing import List, Tuple, Optional
 import pyproj
 
+# Klasse for å lagre ett TIT-element (linje, bue eller klotoide)
 class TitElement:
     def __init__(self, 
                  start_station: float, 
@@ -21,13 +22,14 @@ class TitElement:
         self.end_n = end_n
         self.end_e = end_e
 
+# Automatisk deteksjon av EPSG-kode fra koordinater
 def detect_epsg(val1: float, val2: float) -> Tuple[Optional[str], bool]:    
     LAT_MIN, LAT_MAX = 57.0, 72.0
     LON_MIN, LON_MAX = 4.0, 32.0
 
     target_crs = pyproj.CRS("EPSG:4326")
 
-    # Kanditater for EPSG
+    # Kandidater for EPSG (UTM og NTM)
     candidates = ["25832", "25833", "25834", "25835", "25831"]
     candidates.extend([str(5100 + i) for i in range(5, 31)])
     configurations = [
@@ -54,6 +56,7 @@ def detect_epsg(val1: float, val2: float) -> Tuple[Optional[str], bool]:
             
     return None, False
 
+# Parser NYL-fil (vertikalprofil med stasjon og høyde)
 def parse_nyl(content: str) -> List[Tuple[float, float]]:
     points = []
     lines = content.splitlines()
@@ -71,6 +74,7 @@ def parse_nyl(content: str) -> List[Tuple[float, float]]:
     points.sort(key=lambda x: x[0])
     return points
 
+# Parser TIT-fil (horisontalggeometri med linjer, buer og klotoider)
 def parse_tit(content: str) -> List[TitElement]:
     elements = []
     lines = content.splitlines()
@@ -135,6 +139,7 @@ def parse_tit(content: str) -> List[TitElement]:
             
     return elements
 
+# Interpoler høyde fra NYL-punkter for gitt stasjon
 def interpolate_z(station: float, z_points: List[Tuple[float, float]]) -> float:
     if not z_points:
         return 0.0
@@ -153,14 +158,17 @@ def interpolate_z(station: float, z_points: List[Tuple[float, float]]) -> float:
             return z1 + ratio * (z2 - z1)
     return 0.0
 
+# Generer tette punkter langs geometrien (smooth kurver)
 def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, float]], step: float = 1.0) -> List[List[float]]:
     geometry_points = []
     
+    # Behandle hvert geometrielement
     for el in elements:
         length = el.end_station - el.start_station
         if length <= 0.001:
             continue
-            
+        
+        # Beregn krumning (k) fra radius
         k_start = -1.0 / el.start_radius if abs(el.start_radius) > 1e-4 else 0.0
         k_end = -1.0 / el.end_radius if abs(el.end_radius) > 1e-4 else 0.0
         
@@ -169,6 +177,7 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
         
         dk = k_end - k_start
         
+        # Bygg lokal geometri med numerisk integrasjon
         curr_x, curr_y = 0.0, 0.0
         local_poly = [(0.0, 0.0)]
         ds = length / num_steps
@@ -187,6 +196,7 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
             curr_y += dy
             local_poly.append((curr_x, curr_y))
        
+        # Roter og plasser geometrien i riktig posisjon
         target_dx = el.end_e - el.start_e
         target_dy = el.end_n - el.start_n
         
@@ -210,6 +220,7 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
             
     return geometry_points
 
+# Hent kun endepunkter (forenklet geometri)
 def extract_endpoints_only(elements: List[TitElement], z_points: List[Tuple[float, float]]) -> List[List[float]]:
     geometry_points = []
     if not elements:
@@ -229,6 +240,7 @@ def extract_endpoints_only(elements: List[TitElement], z_points: List[Tuple[floa
 
     return geometry_points
 
+# Transformer koordinater til WGS84 (lon, lat)
 def transform_to_wgs84(points: List[List[float]], from_epsg: str) -> List[List[float]]:
     try:
         source_crs = pyproj.CRS(f"EPSG:{from_epsg}")
@@ -246,10 +258,12 @@ def transform_to_wgs84(points: List[List[float]], from_epsg: str) -> List[List[f
         
     return transformed
 
+# Hovedfunksjon: konverter TIT og NYL til GeoJSON
 def convert_tit_nyl_to_geojson(tit_content: str, nyl_content: str, epsg: str = "25832", filename: Optional[str] = None, smooth: bool = True):
     tit_elements = parse_tit(tit_content)
     nyl_points = parse_nyl(nyl_content)
     
+    # Håndter auto-deteksjon av EPSG
     final_epsg = epsg
     if epsg == "auto" and tit_elements:
         sample_n = tit_elements[0].start_n
@@ -265,7 +279,8 @@ def convert_tit_nyl_to_geojson(tit_content: str, nyl_content: str, epsg: str = "
                     el.end_n, el.end_e = el.end_e, el.end_n
         else:
             final_epsg = "25832" 
-            
+    
+    # Velg glatt kurve eller kun endepunkter
     if smooth:
         raw_points_3d = generate_geometry(tit_elements, nyl_points, step=1.0)
     else:

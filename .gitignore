@@ -49,11 +49,10 @@ visualize_map.html
 # Documentation and helper files
 ALGORITHM.md
 ALGORITHM.pdf
-README.md
 create_map.py
 share.py
 static/
 
-# Temporary files
+# Temporary files 
 *.tmp
 *.bak
