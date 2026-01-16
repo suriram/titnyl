@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output files
+*.geojson
+
+# Test data files
+*.TIT
+*.NYL
+test_local.py
+visualize_map.html
+
+# Documentation and helper files
+ALGORITHM.md
+ALGORITHM.pdf
+README.md
+create_map.py
+share.py
+static/
+
+# Temporary files
+*.tmp
+*.bak
