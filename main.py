@@ -8,7 +8,7 @@ import uvicorn
 
 app = FastAPI(title="TIT-NYL to GeoJSON Converter")
 
-# Serve static files (HTML frontend)
+# Serverer statiske filer (HTML frontend)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
@@ -23,7 +23,7 @@ async def convert_files(
     smooth: bool = Form(True)
 ):
     try:
-        # Helper to read content safely
+        # Hjelpefunksjon for å lese innhold sikkert
         async def read_content(file: UploadFile) -> str:
             content_bytes = await file.read()
             try:
@@ -31,12 +31,12 @@ async def convert_files(
             except UnicodeDecodeError:
                 return content_bytes.decode('latin-1')
 
-        # Helper to get stem (filename without extension)
+        # Hjelpefunksjon for å få filnavn uten filtype
         def get_stem(filename: str) -> str:
             base = os.path.basename(filename)
             return os.path.splitext(base)[0].lower()
 
-        # Load TIT files
+        # Last inn TIT-filer
         tit_map = {}
         for tf in tit_files:
             if tf.filename is None:
@@ -44,7 +44,7 @@ async def convert_files(
             stem = get_stem(tf.filename)
             tit_map[stem] = (tf.filename, await read_content(tf))
 
-        # Load NYL files
+        # Last inn NYL-filer
         nyl_map = {}
         for nf in nyl_files:
             if nf.filename is None:
@@ -52,15 +52,15 @@ async def convert_files(
             stem = get_stem(nf.filename)
             nyl_map[stem] = await read_content(nf)
 
-        # Match and Process
+        # Match og prosesser
         all_features = []
         
-        # We iterate over keys that exist in both maps
+        # Iterer over nøkler som finnes i begge mappene
         common_keys = set(tit_map.keys()) & set(nyl_map.keys())
         
         if not common_keys:
              return {
-                "message": "No matching .TIT and .NYL pairs found (matched by filename).",
+                "message": "Ingen matching funnet. tit og nyl filer må ha samme navn.",
                 "type": "FeatureCollection",
                 "features": []
              }
@@ -69,7 +69,7 @@ async def convert_files(
             original_filename, tit_content = tit_map[key]
             nyl_content = nyl_map[key]
             
-            # Convert
+            # Konverter
             result = convert_tit_nyl_to_geojson(
                 tit_content, 
                 nyl_content, 
@@ -78,7 +78,7 @@ async def convert_files(
                 smooth=smooth
             )
             
-            # Aggregate features
+            # Samle features
             if result.get("features"):
                 all_features.extend(result["features"])
         
