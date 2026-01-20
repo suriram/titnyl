@@ -74,9 +74,22 @@ def parse_nyl(content: str) -> List[Tuple[float, float]]:
             points.append((station, z))
         except ValueError:
             continue
-            
+    
+    # Sorter og fjern duplikate stasjoner (behold siste)
     points.sort(key=lambda x: x[0])
-    return points
+    unique_points = []
+    i = 0
+    while i < len(points):
+        station, z = points[i]
+        # Finn alle punkter med samme stasjon
+        j = i + 1
+        while j < len(points) and abs(points[j][0] - station) < 0.001:
+            j += 1
+        # Behold siste forekomst
+        unique_points.append(points[j - 1])
+        i = j
+    
+    return unique_points
 
 # Parser TIT-fil (horisontalggeometri med linjer, buer og klotoider)
 def parse_tit(content: str) -> List[TitElement]:
@@ -182,29 +195,85 @@ def _safe_float(value: Any) -> float:
 # Generer tette punkter langs geometrien (smooth kurver)
 def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, float]], step: float = 5.0, smooth_z: bool = False) -> List[List[float]]:
     geometry_points = []
-    all_z_values = []
     
-    # Lag interpolator for z-verdier hvis smooth_z er aktivert
-    z_interpolator = None
-    if smooth_z and len(z_points) >= 2:
-        try:
-            # Slå sammen duplikate stasjoner ved å snitte z-verdier
-            accum = {}
-            for s, z in z_points:
-                if s in accum:
-                    acc_sum, acc_cnt = accum[s]
-                    accum[s] = (acc_sum + z, acc_cnt + 1)
+    # Lag interpolator for z-verdier - alltid lineær mellom knekkpunkter
+    stations_nyl = []
+    z_nyl = []
+    
+    if len(z_points) >= 2:
+        # Slå sammen duplikate stasjoner ved å snitte z-verdier
+        accum = {}
+        for s, z in z_points:
+            if s in accum:
+                acc_sum, acc_cnt = accum[s]
+                accum[s] = (acc_sum + z, acc_cnt + 1)
+            else:
+                accum[s] = (z, 1)
+        stations_nyl = sorted(accum.keys())
+        z_nyl = [accum[s][0] / accum[s][1] for s in stations_nyl]
+        
+        # Hvis smooth_z, legg til ekstra punkter rundt knekkpunktene for lokal smoothing
+        if smooth_z and len(stations_nyl) >= 3:
+            curve_length = 100.0  # Total lengde på vertikalkurven (L)
+            new_stations = []
+            new_z = []
+            
+            # Første punkt
+            new_stations.append(stations_nyl[0])
+            new_z.append(z_nyl[0])
+            
+            # For hvert indre knekkpunkt, legg til vertikal kurve
+            for i in range(1, len(stations_nyl) - 1):
+                s_curr = stations_nyl[i]
+                z_curr = z_nyl[i]
+                
+                # Beregn stigning før og etter (i desimaler)
+                s_prev, z_prev = stations_nyl[i-1], z_nyl[i-1]
+                s_next, z_next = stations_nyl[i+1], z_nyl[i+1]
+                
+                g1 = (z_curr - z_prev) / (s_curr - s_prev) if s_curr > s_prev else 0  # Stigning før
+                g2 = (z_next - z_curr) / (s_next - s_curr) if s_next > s_curr else 0  # Stigning etter
+                
+                # Algebrisk differanse i stigning
+                A = g2 - g1
+                
+                # Kun legg til kurve hvis det er en signifikant endring i stigning
+                if abs(A) > 0.005:
+                    # Beregn start og slutt av vertikalkurven
+                    # Kurven er sentrert rundt knekkpunktet
+                    L = curve_length
+                    s_start = max(s_curr - L/2, s_prev + 0.1)  # Start av kurve
+                    s_end = min(s_curr + L/2, s_next - 0.1)    # Slutt av kurve
+                    actual_L = s_end - s_start
+                    
+                    # Beregn z ved start av kurve (fra lineær del 1)
+                    z_start = z_curr - g1 * (s_curr - s_start)
+                    
+                    # Legg til punkter langs vertikalkurven
+                    # Bruker parabolsk kurve: z = z_start + g1*x + (A/(2*L))*x^2
+                    # der x er avstand fra s_start
+                    num_points = 11
+                    for j in range(num_points):
+                        x = (j / (num_points - 1)) * actual_L  # Avstand fra start av kurve
+                        s = s_start + x
+                        
+                        # Parabolsk vertikalkurve
+                        z = z_start + g1 * x + (A / (2 * actual_L)) * x * x
+                        
+                        new_stations.append(s)
+                        new_z.append(z)
                 else:
-                    accum[s] = (z, 1)
-            stations_nyl = sorted(accum.keys())
-            z_nyl = [accum[s][0] / accum[s][1] for s in stations_nyl]
-
-            if len(stations_nyl) >= 2:
-                k_val = min(3, len(stations_nyl) - 1)
-                # Interpolerende spline (s=0) og konstant ekstrapolering utenfor intervallet
-                z_interpolator = UnivariateSpline(stations_nyl, z_nyl, k=k_val, s=0, ext=1)
-        except Exception:
-            z_interpolator = None
+                    # Ikke et signifikant knekkpunkt, behold som det er
+                    new_stations.append(s_curr)
+                    new_z.append(z_curr)
+            
+            # Siste punkt
+            new_stations.append(stations_nyl[-1])
+            new_z.append(z_nyl[-1])
+            
+            stations_nyl = new_stations
+            z_nyl = new_z
+            print(f"Applied parabolic vertical curves (L={curve_length}m) around knekkpunkter, expanded to {len(stations_nyl)} points")
     
     # Behandle hvert geometrielement
     for el in elements:
@@ -259,31 +328,10 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
             
             s_val = el.start_station + (i * ds)
             
-            # Bruk interpolerende spline hvis smooth_z er aktivert
-            if z_interpolator is not None:
-                try:
-                    raw_z = z_interpolator(float(s_val))
-                    z_val = _safe_float(raw_z)
-                    if math.isnan(z_val):
-                        z_val = interpolate_z(s_val, z_points)
-                except Exception:
-                    z_val = interpolate_z(s_val, z_points)
-            else:
-                z_val = interpolate_z(s_val, z_points)
+            # Bruk alltid lineær interpolasjon (smooth_z har allerede lagt til ekstra punkter)
+            z_val = interpolate_z(s_val, list(zip(stations_nyl, z_nyl)) if stations_nyl else z_points)
             
             geometry_points.append([final_e, final_n, z_val])
-            all_z_values.append(z_val)
-    
-    # Appliser gaussian smoothing til z-verdier hvis smooth_z er aktivert
-    if smooth_z and len(all_z_values) > 1:
-        try:
-            # sigma skaleres svakt med antall punkter for å unngå oversmoothing
-            sigma = max(1.0, min(5.0, len(all_z_values) / 500.0))
-            smoothed_z = gaussian_filter1d(all_z_values, sigma=sigma)
-            for i, point in enumerate(geometry_points):
-                point[2] = float(smoothed_z[i])
-        except Exception:
-            pass  # Fallback til original verdier
             
     return geometry_points
 

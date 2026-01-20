@@ -80,9 +80,11 @@ E_global = StartE + x_rotert
 N_global = StartN + y_rotert
 ```
 
-## Z-koordinat interpolasjon
+## Z-koordinat interpolasjon og smoothing
 
 NYL-filer inneholder vertikalprofil som `(stasjon, z_verdi)` par.
+
+### Lineær interpolasjon (standard)
 
 For en gitt stasjon `s` brukes lineær interpolasjon:
 
@@ -91,6 +93,49 @@ z(s) = z₁ + (s - s₁)/(s₂ - s₁) × (z₂ - z₁)
 ```
 
 hvor `s₁ ≤ s ≤ s₂` er nærmeste punkter i NYL-data.
+
+### Z-smoothing med parabolske vertikalkurver
+
+Når `smooth_z=True` appliseres parabolske vertikalkurver rundt knekkpunkter (endringer i stigningstall):
+
+**Algoritme:**
+
+1. **Detektér knekkpunkter:** Finn punkter hvor stigningstallet endrer seg betydelig
+   ```
+   A = g₂ - g₁  (algebrisk differanse)
+   ```
+
+2. **Lag vertikalkurve:** For hvert knekkpunkt, interpoler en parabolsk kurve over lengde L (100m):
+   ```
+   z(x) = z_start + g₁·x + (A/(2L))·x²
+   ```
+   
+   hvor:
+   - `z_start` = z-verdi ved start av kurve
+   - `g₁` = stigningstall før knekkpunkt (konstant)
+   - `g₂` = stigningstall etter knekkpunkt (konstant)
+   - `A = g₂ - g₁` = algebrisk differanse
+   - `L` = kurvelengde (100m)
+   - `x` = avstand fra start av kurve (0 til L)
+
+3. **Tangering:** Kurven tangerer begge lineære deler:
+   - Ved start: stigning = g₁
+   - Ved slutt: stigning = g₂
+
+4. **Resultat:** Realistisk vertikalkurvatur som bevarer lineære deler og smoothes kun rundt knekkpunktene
+
+**Brukseksempel:**
+
+```python
+# Med z-smoothing (parabolske vertikalkurver)
+result = convert_tit_nyl_to_geojson(
+    tit_content, nyl_content,
+    smooth=True,      # Smooth horisontal geometri
+    smooth_z=True     # Smooth vertikal profil (parabolske kurver)
+)
+```
+
+**Anvendelse:** Denne smoothingen er særlig nyttig for energimodeller av kjøretøyer, hvor realistisk vertikal kurvatur er viktig for å beregne akselerasjon og energiforbruk.
 
 ## Koordinattransformasjon
 
@@ -106,18 +151,5 @@ For å automatisk detektere koordinatsystem:
 4. Sjekk om resultat er innenfor Norges grenser:
    - Latitude: 57.0°N - 72.0°N
    - Longitude: 4.0°E - 32.0°E
-
-### WGS84-transformasjon
-
-Bruker pyproj for korrekt kartprojeksjon:
-
-```python
-transformer = pyproj.Transformer.from_crs(
-    source_crs="EPSG:25832",  # eller detektert EPSG
-    target_crs="EPSG:4326",    # WGS84
-    always_xy=True
-)
-lon, lat = transformer.transform(easting, northing)
-```
 
 
