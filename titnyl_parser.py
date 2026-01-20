@@ -1,6 +1,9 @@
 import math
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Any
 import pyproj
+import numpy as np
+from scipy.interpolate import UnivariateSpline
+from scipy.ndimage import gaussian_filter1d
 
 # Klasse for å lagre ett TIT-element (linje, bue eller klotoide)
 class TitElement:
@@ -32,6 +35,7 @@ def detect_epsg(val1: float, val2: float) -> Tuple[Optional[str], bool]:
     # Kandidater for EPSG (UTM og NTM)
     candidates = ["25832", "25833", "25834", "25835", "25831"]
     candidates.extend([str(5100 + i) for i in range(5, 31)])
+    candidates.append("5973")  # NTM13 (EPSG:5973)
     configurations = [
         (val1, val2, False), 
         (val2, val1, True) 
@@ -158,9 +162,49 @@ def interpolate_z(station: float, z_points: List[Tuple[float, float]]) -> float:
             return z1 + ratio * (z2 - z1)
     return 0.0
 
+
+def _safe_float(value: Any) -> float:
+    """Try to coerce various numeric-like containers to a scalar float."""
+    try:
+        if isinstance(value, np.ndarray):
+            if value.size == 0:
+                return 0.0
+            return float(value.astype(float, copy=False).ravel()[0])
+        if isinstance(value, (list, tuple)):
+            if not value:
+                return 0.0
+            return _safe_float(value[0])
+        return float(value)
+    except Exception:
+        return 0.0
+
+
 # Generer tette punkter langs geometrien (smooth kurver)
-def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, float]], step: float = 1.0) -> List[List[float]]:
+def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, float]], step: float = 5.0, smooth_z: bool = False) -> List[List[float]]:
     geometry_points = []
+    all_z_values = []
+    
+    # Lag interpolator for z-verdier hvis smooth_z er aktivert
+    z_interpolator = None
+    if smooth_z and len(z_points) >= 2:
+        try:
+            # Slå sammen duplikate stasjoner ved å snitte z-verdier
+            accum = {}
+            for s, z in z_points:
+                if s in accum:
+                    acc_sum, acc_cnt = accum[s]
+                    accum[s] = (acc_sum + z, acc_cnt + 1)
+                else:
+                    accum[s] = (z, 1)
+            stations_nyl = sorted(accum.keys())
+            z_nyl = [accum[s][0] / accum[s][1] for s in stations_nyl]
+
+            if len(stations_nyl) >= 2:
+                k_val = min(3, len(stations_nyl) - 1)
+                # Interpolerende spline (s=0) og konstant ekstrapolering utenfor intervallet
+                z_interpolator = UnivariateSpline(stations_nyl, z_nyl, k=k_val, s=0, ext=1)
+        except Exception:
+            z_interpolator = None
     
     # Behandle hvert geometrielement
     for el in elements:
@@ -214,9 +258,32 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
             final_n = el.start_n + ry
             
             s_val = el.start_station + (i * ds)
-            z_val = interpolate_z(s_val, z_points)
+            
+            # Bruk interpolerende spline hvis smooth_z er aktivert
+            if z_interpolator is not None:
+                try:
+                    raw_z = z_interpolator(float(s_val))
+                    z_val = _safe_float(raw_z)
+                    if math.isnan(z_val):
+                        z_val = interpolate_z(s_val, z_points)
+                except Exception:
+                    z_val = interpolate_z(s_val, z_points)
+            else:
+                z_val = interpolate_z(s_val, z_points)
             
             geometry_points.append([final_e, final_n, z_val])
+            all_z_values.append(z_val)
+    
+    # Appliser gaussian smoothing til z-verdier hvis smooth_z er aktivert
+    if smooth_z and len(all_z_values) > 1:
+        try:
+            # sigma skaleres svakt med antall punkter for å unngå oversmoothing
+            sigma = max(1.0, min(5.0, len(all_z_values) / 500.0))
+            smoothed_z = gaussian_filter1d(all_z_values, sigma=sigma)
+            for i, point in enumerate(geometry_points):
+                point[2] = float(smoothed_z[i])
+        except Exception:
+            pass  # Fallback til original verdier
             
     return geometry_points
 
@@ -259,7 +326,7 @@ def transform_to_wgs84(points: List[List[float]], from_epsg: str) -> List[List[f
     return transformed
 
 # Hovedfunksjon: konverter TIT og NYL til GeoJSON
-def convert_tit_nyl_to_geojson(tit_content: str, nyl_content: str, epsg: str = "25832", filename: Optional[str] = None, smooth: bool = True):
+def convert_tit_nyl_to_geojson(tit_content: str, nyl_content: str, epsg: str = "25832", filename: Optional[str] = None, smooth: bool = True, smooth_z: bool = False):
     tit_elements = parse_tit(tit_content)
     nyl_points = parse_nyl(nyl_content)
     
@@ -282,7 +349,7 @@ def convert_tit_nyl_to_geojson(tit_content: str, nyl_content: str, epsg: str = "
     
     # Velg glatt kurve eller kun endepunkter
     if smooth:
-        raw_points_3d = generate_geometry(tit_elements, nyl_points, step=1.0)
+        raw_points_3d = generate_geometry(tit_elements, nyl_points, step=5.0, smooth_z=smooth_z)
     else:
         raw_points_3d = extract_endpoints_only(tit_elements, nyl_points)
     
@@ -291,7 +358,8 @@ def convert_tit_nyl_to_geojson(tit_content: str, nyl_content: str, epsg: str = "
     properties = {
         "source": "titnyl-api",
         "epsg": final_epsg,
-        "smooth": smooth
+        "smooth": smooth,
+        "smooth_z": smooth_z
     }
     if filename:
         properties["filename"] = filename

@@ -100,8 +100,8 @@ For å automatisk detektere koordinatsystem:
 
 1. Test både (val1=N, val2=E) og (val1=E, val2=N)
 2. For hver permutasjon, test kandidat-EPSG koder:
-   - UTM-soner: 25831-25835
-   - NTM-soner: 5105-5130
+    - UTM-soner: 25831-25835
+    - NTM-soner: 5105-5130 og 5973 (NTM13)
 3. Transformer til WGS84 (EPSG:4326)
 4. Sjekk om resultat er innenfor Norges grenser:
    - Latitude: 57.0°N - 72.0°N
