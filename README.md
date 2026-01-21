@@ -102,10 +102,21 @@ Når `smooth_z=True` appliseres parabolske vertikalkurver rundt knekkpunkter (en
 
 1. **Detektér knekkpunkter:** Finn punkter hvor stigningstallet endrer seg betydelig
    ```
-   A = g₂ - g₁  (algebrisk differanse)
+   A = g₂ - g₁  (algebrisk differanse i stigning)
    ```
 
-2. **Lag vertikalkurve:** For hvert knekkpunkt, interpoler en parabolsk kurve over lengde L (100m):
+2. **Beregn dynamisk kurvelengde:** Lengden tilpasses endringen i stigning
+   ```
+   L = K × |A| × 150
+   ```
+   
+   hvor K-faktoren avhenger av kurvetypen:
+   - **Konveks kurve** (topp, A < 0): K = 15 (synlengde kritisk)
+   - **Konkav kurve** (dal, A > 0): K = 10 (mindre kritisk)
+   
+   Kurvelengde begrenses til: **80 ≤ L ≤ 300 meter**
+
+3. **Lag vertikalkurve:** For hvert knekkpunkt, interpoler en parabolsk kurve:
    ```
    z(x) = z_start + g₁·x + (A/(2L))·x²
    ```
@@ -115,14 +126,14 @@ Når `smooth_z=True` appliseres parabolske vertikalkurver rundt knekkpunkter (en
    - `g₁` = stigningstall før knekkpunkt (konstant)
    - `g₂` = stigningstall etter knekkpunkt (konstant)
    - `A = g₂ - g₁` = algebrisk differanse
-   - `L` = kurvelengde (100m)
+   - `L` = dynamisk kurvelengde (80-300m)
    - `x` = avstand fra start av kurve (0 til L)
 
-3. **Tangering:** Kurven tangerer begge lineære deler:
+4. **Tangering:** Kurven tangerer begge lineære deler:
    - Ved start: stigning = g₁
    - Ved slutt: stigning = g₂
 
-4. **Resultat:** Realistisk vertikalkurvatur som bevarer lineære deler og smoothes kun rundt knekkpunktene
+5. **Resultat:** Realistisk vertikalkurvatur som bevarer lineære deler og smoothes kun rundt knekkpunktene. Kurvelengden tilpasses automatisk etter hvor stor endringen i stigningstall er.
 
 **Brukseksempel:**
 
