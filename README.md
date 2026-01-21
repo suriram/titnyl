@@ -52,7 +52,7 @@ y(s) = ∫₀ˢ sin(θ(σ)) dσ
 Vi bruker numerisk integrasjon (midtpunktsregel) med skritt `ds`:
 
 ```python
-for hver steg:
+for hvert steg:
     s_mid = (s_prev + s_curr) / 2
     θ_mid = k_start × s_mid + ½ × (dk/L) × s_mid²
     dx = cos(θ_mid) × ds
@@ -135,7 +135,7 @@ result = convert_tit_nyl_to_geojson(
 )
 ```
 
-**Anvendelse:** Denne smoothingen er særlig nyttig for energimodeller av kjøretøyer, hvor realistisk vertikal kurvatur er viktig for å beregne akselerasjon og energiforbruk.
+**Anvendelse:** Denne smoothingen er særlig nyttig for energimodeller av kjøretøyer, hvor realistisk vertikalkurvatur er viktig for å beregne akselerasjon og energiforbruk.
 
 ## Koordinattransformasjon
 
