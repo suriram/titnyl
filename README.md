@@ -114,7 +114,7 @@ Når `smooth_z=True` appliseres parabolske vertikalkurver rundt knekkpunkter (en
    - **Konveks kurve** (topp, A < 0): K = 15 (synlengde kritisk)
    - **Konkav kurve** (dal, A > 0): K = 10 (mindre kritisk)
    
-   Kurvelengde begrenses til: **80 ≤ L ≤ 300 meter**
+   Kurvelengde begrenses til: **80 ≤ L ≤ 300 meter** (disse verdiene er satt litt tilfeldig. Jeg ser i TNExt så kan lengden være over 600 meter. Dette fører til at man mister mye av lokal maksimumsverdi. Er dette greit å miste f.eks 10 meter av høydeprofilen som skjer i TNExt utjevningen?)
 
 3. **Lag vertikalkurve:** For hvert knekkpunkt, interpoler en parabolsk kurve:
    ```
