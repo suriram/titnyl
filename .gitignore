@@ -45,6 +45,7 @@ Thumbs.db
 *.NYL
 test_local.py
 visualize_map.html
+main.py
 
 # Documentation and helper files
 ALGORITHM.md
@@ -52,6 +53,7 @@ ALGORITHM.md
 # QGIS project files
 Qgis/
 
+README.pdf
 ALGORITHM.pdf
 create_map.py
 share.py

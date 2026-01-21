@@ -214,7 +214,6 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
         
         # Hvis smooth_z, legg til ekstra punkter rundt knekkpunktene for lokal smoothing
         if smooth_z and len(stations_nyl) >= 3:
-            curve_length = 100.0  # Total lengde på vertikalkurven (L)
             new_stations = []
             new_z = []
             
@@ -239,6 +238,16 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
                 
                 # Kun legg til kurve hvis det er en signifikant endring i stigning
                 if abs(A) > 0.005:
+                    # Beregn dynamisk kurvelengde basert på endring i stigning
+                    # L = K * |A| * multiplikator, hvor K avhenger av kurvetypen
+                    # Konveks (topp, A < 0): K = 15 (synlengde kritisk)
+                    # Konkav (dal, A > 0): K = 10 (mindre kritisk)
+                    K = 15 if A < 0 else 10
+                    curve_length = K * abs(A) * 150
+                    
+                    # Begrens kurvelengde til 80-300m
+                    curve_length = max(80.0, min(300.0, curve_length))
+                    
                     # Beregn start og slutt av vertikalkurven
                     # Kurven er sentrert rundt knekkpunktet
                     L = curve_length
@@ -273,7 +282,7 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
             
             stations_nyl = new_stations
             z_nyl = new_z
-            print(f"Applied parabolic vertical curves (L={curve_length}m) around knekkpunkter, expanded to {len(stations_nyl)} points")
+            print(f"Applied parabolic vertical curves with dynamic lengths (80-300m), expanded to {len(stations_nyl)} points")
     
     # Behandle hvert geometrielement
     for el in elements:
