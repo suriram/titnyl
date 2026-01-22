@@ -1,3 +1,5 @@
+# MIT License - See LICENSE file for details
+
 import math
 from typing import List, Tuple, Optional, Any
 import pyproj
@@ -245,8 +247,8 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
                     K = 15 if A < 0 else 10
                     curve_length = K * abs(A) * 150
                     
-                    # Begrens kurvelengde til 80-300m
-                    curve_length = max(80.0, min(300.0, curve_length))
+                    # Begrens kurvelengde til 80-900m   
+                    curve_length = max(80.0, min(900.0, curve_length))
                     
                     # Beregn start og slutt av vertikalkurven
                     # Kurven er sentrert rundt knekkpunktet
@@ -282,7 +284,7 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
             
             stations_nyl = new_stations
             z_nyl = new_z
-            print(f"Applied parabolic vertical curves with dynamic lengths (80-300m), expanded to {len(stations_nyl)} points")
+            print(f"{len(stations_nyl)}")
     
     # Behandle hvert geometrielement
     for el in elements:

@@ -52,13 +52,16 @@ ALGORITHM.md
 
 # QGIS project files
 Qgis/
-
+PRESENTASJON.md
 README.pdf
 ALGORITHM.pdf
 create_map.py
 share.py
 static/
-
+kart.html
+test_lokalt.py
+dele_ngro.py
+kart.py
 # Temporary files 
 *.tmp
 *.bak
