@@ -1,11 +1,8 @@
 # MIT License - See LICENSE file for details
 
 import math
-from typing import List, Tuple, Optional, Any
+from typing import List, Tuple, Optional
 import pyproj
-import numpy as np
-from scipy.interpolate import UnivariateSpline
-from scipy.ndimage import gaussian_filter1d
 
 # Klasse for å lagre ett TIT-element (linje, bue eller klotoide)
 class TitElement:
@@ -63,7 +60,8 @@ def detect_epsg(val1: float, val2: float) -> Tuple[Optional[str], bool]:
     return None, False
 
 # Parser NYL-fil (vertikalprofil med stasjon og høyde)
-def parse_nyl(content: str) -> List[Tuple[float, float]]:
+def parse_nyl(content: str) -> List[Tuple[float, float, float]]:
+    """Parse NYL-fil. Returnerer liste av (stasjon, høyde, radius)."""
     points = []
     lines = content.splitlines()
     for line in lines:
@@ -73,7 +71,8 @@ def parse_nyl(content: str) -> List[Tuple[float, float]]:
         try:
             station = float(parts[0])
             z = float(parts[1])
-            points.append((station, z))
+            radius = float(parts[2]) if len(parts) >= 3 else 0.0
+            points.append((station, z, radius))
         except ValueError:
             continue
     
@@ -82,7 +81,7 @@ def parse_nyl(content: str) -> List[Tuple[float, float]]:
     unique_points = []
     i = 0
     while i < len(points):
-        station, z = points[i]
+        station, z, radius = points[i]
         # Finn alle punkter med samme stasjon
         j = i + 1
         while j < len(points) and abs(points[j][0] - station) < 0.001:
@@ -159,7 +158,7 @@ def parse_tit(content: str) -> List[TitElement]:
     return elements
 
 # Interpoler høyde fra NYL-punkter for gitt stasjon
-def interpolate_z(station: float, z_points: List[Tuple[float, float]]) -> float:
+def interpolate_z(station: float, z_points: List[Tuple[float, float, float]]) -> float:
     if not z_points:
         return 0.0
     
@@ -169,8 +168,8 @@ def interpolate_z(station: float, z_points: List[Tuple[float, float]]) -> float:
         return z_points[-1][1]
         
     for j in range(len(z_points) - 1):
-        s1, z1 = z_points[j]
-        s2, z2 = z_points[j+1]
+        s1, z1, _ = z_points[j]
+        s2, z2, _ = z_points[j+1]
         if s1 <= station <= s2:
             if s2 == s1: return z1
             ratio = (station - s1) / (s2 - s1)
@@ -178,55 +177,44 @@ def interpolate_z(station: float, z_points: List[Tuple[float, float]]) -> float:
     return 0.0
 
 
-def _safe_float(value: Any) -> float:
-    """Try to coerce various numeric-like containers to a scalar float."""
-    try:
-        if isinstance(value, np.ndarray):
-            if value.size == 0:
-                return 0.0
-            return float(value.astype(float, copy=False).ravel()[0])
-        if isinstance(value, (list, tuple)):
-            if not value:
-                return 0.0
-            return _safe_float(value[0])
-        return float(value)
-    except Exception:
-        return 0.0
-
-
 # Generer tette punkter langs geometrien (smooth kurver)
-def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, float]], step: float = 5.0, smooth_z: bool = False) -> List[List[float]]:
+def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, float, float]], step: float = 5.0, smooth_z: bool = False) -> List[List[float]]:
     geometry_points = []
     
     # Lag interpolator for z-verdier - alltid lineær mellom knekkpunkter
     stations_nyl = []
     z_nyl = []
+    radius_nyl = []
     
     if len(z_points) >= 2:
         # Slå sammen duplikate stasjoner ved å snitte z-verdier
         accum = {}
-        for s, z in z_points:
+        for s, z, r in z_points:
             if s in accum:
-                acc_sum, acc_cnt = accum[s]
-                accum[s] = (acc_sum + z, acc_cnt + 1)
+                acc_sum, acc_cnt, rad = accum[s]
+                accum[s] = (acc_sum + z, acc_cnt + 1, r)
             else:
-                accum[s] = (z, 1)
+                accum[s] = (z, 1, r)
         stations_nyl = sorted(accum.keys())
         z_nyl = [accum[s][0] / accum[s][1] for s in stations_nyl]
+        radius_nyl = [accum[s][2] for s in stations_nyl]
         
         # Hvis smooth_z, legg til ekstra punkter rundt knekkpunktene for lokal smoothing
         if smooth_z and len(stations_nyl) >= 3:
             new_stations = []
             new_z = []
+            new_radius = []  # Må også oppdatere radius-listen
             
             # Første punkt
             new_stations.append(stations_nyl[0])
             new_z.append(z_nyl[0])
+            new_radius.append(0.0)  # Start har ingen kurveradius
             
             # For hvert indre knekkpunkt, legg til vertikal kurve
             for i in range(1, len(stations_nyl) - 1):
                 s_curr = stations_nyl[i]
                 z_curr = z_nyl[i]
+                R = radius_nyl[i]  # Vertikalkurveradius fra NYL-fil
                 
                 # Beregn stigning før og etter (i desimaler)
                 s_prev, z_prev = stations_nyl[i-1], z_nyl[i-1]
@@ -238,17 +226,14 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
                 # Algebrisk differanse i stigning
                 A = g2 - g1
                 
-                # Kun legg til kurve hvis det er en signifikant endring i stigning
-                if abs(A) > 0.005:
-                    # Beregn dynamisk kurvelengde basert på endring i stigning
-                    # L = K * |A| * multiplikator, hvor K avhenger av kurvetypen
-                    # Konveks (topp, A < 0): K = 15 (synlengde kritisk)
-                    # Konkav (dal, A > 0): K = 10 (mindre kritisk)
-                    K = 46 if A < 0 else 33
-                    curve_length = K * abs(A) * 150
+                # Kun legg til kurve hvis det er radius oppgitt OG signifikant endring i stigning
+                if R > 0 and abs(A) > 0.001:
+                    # Beregn kurvelengde fra radius og stigninsendring
+                    # L = R * |A| (der A er i desimaler)
+                    curve_length = R * abs(A)
                     
-                    # Begrens kurvelengde til 80-900m   
-                    curve_length = max(80.0, min(900.0, curve_length))
+                    # Begrens kurvelengde til 40-900m   
+                    curve_length = max(40.0, min(900.0, curve_length))
                     
                     # Beregn start og slutt av vertikalkurven
                     # Kurven er sentrert rundt knekkpunktet
@@ -257,34 +242,87 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
                     s_end = min(s_curr + L/2, s_next - 0.1)    # Slutt av kurve
                     actual_L = s_end - s_start
                     
+                    # Legg til lineært segment FØR kurven (fra forrige punkt til start av kurve)
+                    prev_end_s = new_stations[-1] if new_stations else s_prev
+                    prev_end_z = new_z[-1] if new_z else z_prev
+                    
                     # Beregn z ved start av kurve (fra lineær del 1)
                     z_start = z_curr - g1 * (s_curr - s_start)
                     
+                    if s_start > prev_end_s + 1.0:  # Hvis det er et gap
+                        num_linear = max(3, int((s_start - prev_end_s) / 10.0))
+                        for j in range(1, num_linear):
+                            ratio = j / num_linear
+                            s_lin = prev_end_s + ratio * (s_start - prev_end_s)
+                            # Lineær interpolasjon med riktig stigning g1
+                            z_lin = prev_end_z + g1 * (s_lin - prev_end_s)
+                            new_stations.append(s_lin)
+                            new_z.append(z_lin)
+                            new_radius.append(0.0)  # Lineære segmenter har ingen kurveradius
+                    
                     # Legg til punkter langs vertikalkurven
-                    # Bruker parabolsk kurve: z = z_start + g1*x + (A/(2*L))*x^2
+                    # Bruker sirkelbue med radius R: z = z_start + g1*x + (A/(2*L))*x^2
                     # der x er avstand fra s_start
                     num_points = max(21, int(curve_length / 2.5) + 1)  # Økt fra 11, mer glatt
                     for j in range(num_points):
                         x = (j / (num_points - 1)) * actual_L  # Avstand fra start av kurve
                         s = s_start + x
                         
-                        # Parabolsk vertikalkurve
+                        # Sirkelbue vertikalkurve (parabolsk approksimering)
                         z = z_start + g1 * x + (A / (2 * actual_L)) * x * x
                         
                         new_stations.append(s)
                         new_z.append(z)
+                        new_radius.append(R)  # Kurveradius for dette segmentet
                 else:
                     # Ikke et signifikant knekkpunkt, behold som det er
-                    new_stations.append(s_curr)
-                    new_z.append(z_curr)
+                    # Men legg til lineært segment fra forrige til dette punktet
+                    prev_end_s = new_stations[-1] if new_stations else s_prev
+                    prev_end_z = new_z[-1] if new_z else z_prev
+                    
+                    if s_curr > prev_end_s + 1.0:
+                        num_linear = max(3, int((s_curr - prev_end_s) / 10.0))
+                        for j in range(1, num_linear + 1):
+                            ratio = j / num_linear
+                            s_lin = prev_end_s + ratio * (s_curr - prev_end_s)
+                            z_lin = prev_end_z + ratio * (z_curr - prev_end_z)
+                            new_stations.append(s_lin)
+                            new_z.append(z_lin)
+                            new_radius.append(0.0)
+                    else:
+                        new_stations.append(s_curr)
+                        new_z.append(z_curr)
+                        new_radius.append(R)
             
-            # Siste punkt
-            new_stations.append(stations_nyl[-1])
-            new_z.append(z_nyl[-1])
+            # Legg til lineært segment til siste punkt
+            prev_end_s = new_stations[-1]
+            prev_end_z = new_z[-1]
+            s_last = stations_nyl[-1]
+            z_last = z_nyl[-1]
+            
+            # Beregn stigning fra siste knekkpunkt til slutt
+            if len(stations_nyl) >= 2:
+                g_last = (z_last - z_nyl[-2]) / (s_last - stations_nyl[-2]) if s_last != stations_nyl[-2] else 0
+            else:
+                g_last = 0
+            
+            if s_last > prev_end_s + 1.0:
+                num_linear = max(3, int((s_last - prev_end_s) / 10.0))
+                for j in range(1, num_linear + 1):
+                    s_lin = prev_end_s + (j / num_linear) * (s_last - prev_end_s)
+                    # Lineær interpolasjon med riktig stigning
+                    z_lin = prev_end_z + g_last * (s_lin - prev_end_s)
+                    new_stations.append(s_lin)
+                    new_z.append(z_lin)
+                    new_radius.append(0.0)
+            else:
+                new_stations.append(s_last)
+                new_z.append(z_last)
+                new_radius.append(0.0)
             
             stations_nyl = new_stations
             z_nyl = new_z
-            print(f"{len(stations_nyl)}")
+            radius_nyl = new_radius  # Oppdater også radius-listen
     
     # Behandle hvert geometrielement
     for el in elements:
@@ -340,14 +378,14 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
             s_val = el.start_station + (i * ds)
             
             # Bruk alltid lineær interpolasjon (smooth_z har allerede lagt til ekstra punkter)
-            z_val = interpolate_z(s_val, list(zip(stations_nyl, z_nyl)) if stations_nyl else z_points)
+            z_val = interpolate_z(s_val, list(zip(stations_nyl, z_nyl, radius_nyl)) if stations_nyl else z_points)
             
             geometry_points.append([final_e, final_n, z_val])
             
     return geometry_points
 
 # Hent kun endepunkter (forenklet geometri)
-def extract_endpoints_only(elements: List[TitElement], z_points: List[Tuple[float, float]]) -> List[List[float]]:
+def extract_endpoints_only(elements: List[TitElement], z_points: List[Tuple[float, float, float]]) -> List[List[float]]:
     geometry_points = []
     if not elements:
         return []
