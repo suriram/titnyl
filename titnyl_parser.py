@@ -244,7 +244,7 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
                     # L = K * |A| * multiplikator, hvor K avhenger av kurvetypen
                     # Konveks (topp, A < 0): K = 15 (synlengde kritisk)
                     # Konkav (dal, A > 0): K = 10 (mindre kritisk)
-                    K = 15 if A < 0 else 10
+                    K = 46 if A < 0 else 33
                     curve_length = K * abs(A) * 150
                     
                     # Begrens kurvelengde til 80-900m   
@@ -263,7 +263,7 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
                     # Legg til punkter langs vertikalkurven
                     # Bruker parabolsk kurve: z = z_start + g1*x + (A/(2*L))*x^2
                     # der x er avstand fra s_start
-                    num_points = 11
+                    num_points = max(21, int(curve_length / 2.5) + 1)  # Økt fra 11, mer glatt
                     for j in range(num_points):
                         x = (j / (num_points - 1)) * actual_L  # Avstand fra start av kurve
                         s = s_start + x
