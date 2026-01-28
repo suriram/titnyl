@@ -82,11 +82,11 @@ N_global = StartN + y_rotert
 
 ## Z-koordinat interpolasjon og smoothing
 
-NYL-filer inneholder vertikalprofil som `(stasjon, z_verdi)` par.
+NYL-filer inneholder vertikalprofil som `(stasjon, z_verdi, radius)`.
 
 ### Lineær interpolasjon (standard)
 
-For en gitt stasjon `s` brukes lineær interpolasjon:
+For en gitt stasjon `s` brukes lineær interpolasjon mellom knekkpunkter:
 
 ```
 z(s) = z₁ + (s - s₁)/(s₂ - s₁) × (z₂ - z₁)
@@ -94,59 +94,71 @@ z(s) = z₁ + (s - s₁)/(s₂ - s₁) × (z₂ - z₁)
 
 hvor `s₁ ≤ s ≤ s₂` er nærmeste punkter i NYL-data.
 
-### Z-smoothing med parabolske vertikalkurver
+### Z-smoothing med sirkelbue-vertikalkurver
 
-Når `smooth_z=True` appliseres parabolske vertikalkurver rundt knekkpunkter (endringer i stigningstall):
+Når `smooth_z=True` appliseres vertikalkurver med radius hentet fra NYL-filens tredje kolonne.
 
-**Algoritme:**
+**NYL-filformat:**
+```
+stasjon  høyde  radius
+58.0493  26.65  1100.0000
+99.1188  26.88  1100.0000
+180.663  28.51  2500.0000
+```
+
+**Gangen i øvinga:**
 
 1. **Detektér knekkpunkter:** Finn punkter hvor stigningstallet endrer seg betydelig
    ```
+   g₁ = stigning før knekkpunkt
+   g₂ = stigning etter knekkpunkt  
    A = g₂ - g₁  (algebrisk differanse i stigning)
    ```
 
-2. **Beregn dynamisk kurvelengde:** Lengden tilpasses endringen i stigning
+2. **Beregn kurvelengde fra radius:** Lengden beregnes fra vertikalkurveradius i NYL-filen
    ```
-   L = K × |A| × 150
+   L = R × |A|
    ```
    
-   hvor K-faktoren avhenger av kurvetypen:
-   - **Konveks kurve** (topp, A < 0): K = 15 (synlengde kritisk)
-   - **Konkav kurve** (dal, A > 0): K = 10 (mindre kritisk)
+   hvor:
+   - R = vertikalkurveradius fra NYL-fil (tredje kolonne)
+   - A = algebrisk differanse i stigning (desimaler)
    
-   Kurvelengde begrenses til: **80 ≤ L ≤ 300 meter** (disse verdiene er satt litt tilfeldig. Jeg ser i TNExt så kan lengden være over 600 meter. Dette fører til at man mister mye av lokal maksimumsverdi. Er dette greit å miste f.eks 10 meter av høydeprofilen som skjer i TNExt utjevningen?)
+   Kurvelengde begrenses til: **40 ≤ L ≤ 900 meter**
 
-3. **Lag vertikalkurve:** For hvert knekkpunkt, interpoler en parabolsk kurve:
+3. **Lag sirkelbue-vertikalkurve:** For hvert knekkpunkt med oppgitt radius, interpoler en parabolsk tilnærming til sirkelbue:
    ```
    z(x) = z_start + g₁·x + (A/(2L))·x²
    ```
    
    hvor:
    - `z_start` = z-verdi ved start av kurve
-   - `g₁` = stigningstall før knekkpunkt (konstant)
-   - `g₂` = stigningstall etter knekkpunkt (konstant)
+   - `g₁` = stigningstall før knekkpunkt
+   - `g₂` = stigningstall etter knekkpunkt
    - `A = g₂ - g₁` = algebrisk differanse
-   - `L` = dynamisk kurvelengde (80-300m)
+   - `L` = kurvelengde beregnet fra radius (40-900m)
    - `x` = avstand fra start av kurve (0 til L)
 
-4. **Tangering:** Kurven tangerer begge lineære deler:
+4. **Lineære segmenter:** Mellom vertikalkurvene brukes lineære segmenter med riktig stigning for å sikre kontinuerlig profil.
+
+5. **Tangering:** Kurven tangerer begge lineære deler:
    - Ved start: stigning = g₁
    - Ved slutt: stigning = g₂
 
-5. **Resultat:** Realistisk vertikalkurvatur som bevarer lineære deler og smoothes kun rundt knekkpunktene. Kurvelengden tilpasses automatisk etter hvor stor endringen i stigningstall er.
+6. **Resultat:** Realistisk vertikalkurvatur basert på faktiske kurveradier fra prosjektering. Kurvelengden beregnes automatisk fra radiusen og endringen i stigningstall.
 
 **Brukseksempel:**
 
 ```python
-# Med z-smoothing (parabolske vertikalkurver)
+# Med z-smoothing (sirkelbue-vertikalkurver)
 result = convert_tit_nyl_to_geojson(
     tit_content, nyl_content,
     smooth=True,      # Smooth horisontal geometri
-    smooth_z=True     # Smooth vertikal profil (parabolske kurver)
+    smooth_z=True     # Smooth vertikal profil med radiuser fra NYL
 )
 ```
 
-**Anvendelse:** Denne smoothingen er særlig nyttig for energimodeller av kjøretøyer, hvor realistisk vertikalkurvatur er viktig for å beregne akselerasjon og energiforbruk.
+**Anvendelse:** Denne smoothingen bruker de eksakte vertikalkurveradiusene fra prosjekteringen, som gir realistisk vertikalkurvatur for energimodeller av kjøretøyer, visualisering og analyse.
 
 ## Koordinattransformasjon
 
