@@ -64,6 +64,8 @@ def parse_nyl(content: str) -> List[Tuple[float, float, float]]:
     """Parse NYL-fil. Returnerer liste av (stasjon, høyde, radius)."""
     points = []
     lines = content.splitlines()
+    first_data_line = True
+    
     for line in lines:
         parts = line.strip().split()
         if len(parts) < 2:
@@ -72,6 +74,17 @@ def parse_nyl(content: str) -> List[Tuple[float, float, float]]:
             station = float(parts[0])
             z = float(parts[1])
             radius = float(parts[2]) if len(parts) >= 3 else 0.0
+            
+            # Hopp over første datalinje hvis den ser ut som en header:
+            # - Veldig lav høyde (< 50m) OG høy "radius" (> 1000) som egentlig er sluttstasjon
+            # ELLER
+            # - Høyden er rund (10.0, 20.0 osv) og radius er svært høy
+            if first_data_line and len(parts) >= 3:
+                if (z < 50 and radius > 1000) or (z == round(z) and z < 100 and radius > 10000):
+                    first_data_line = False
+                    continue
+            first_data_line = False
+            
             points.append((station, z, radius))
         except ValueError:
             continue
@@ -233,7 +246,7 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
                     curve_length = R * abs(A)
                     
                     # Begrens kurvelengde til 40-900m   
-                    curve_length = max(40.0, min(900.0, curve_length))
+                    # curve_length = max(40.0, min(900.0, curve_length))
                     
                     # Beregn start og slutt av vertikalkurven
                     # Kurven er sentrert rundt knekkpunktet
@@ -263,7 +276,11 @@ def generate_geometry(elements: List[TitElement], z_points: List[Tuple[float, fl
                     # Legg til punkter langs vertikalkurven
                     # Bruker sirkelbue med radius R: z = z_start + g1*x + (A/(2*L))*x^2
                     # der x er avstand fra s_start
-                    num_points = max(21, int(curve_length / 2.5) + 1)  # Økt fra 11, mer glatt
+                    # num_points = max(21, int(curve_length / 2.5) + 1)  # Økt fra 11, mer glatt (gammel moro)
+                    target_interval = 0.2 
+                    num_points = int(actual_L / target_interval) + 1
+                    num_points = max(num_points, 10) # sikkerhetsnett for perverst korte kurver
+
                     for j in range(num_points):
                         x = (j / (num_points - 1)) * actual_L  # Avstand fra start av kurve
                         s = s_start + x
